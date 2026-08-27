@@ -25,10 +25,13 @@ const io = new Server(fastify.server, {
 
 io.on("connection", (socket) => {
     console.log("Socket Connected", socket.id);
+
+    socket.on("draw:stroke", (stroke) => {
+        socket.broadcast.emit("draw:stroke", stroke);
+    });
     
     socket.on("disconnect", () => {
-        console.log("Socket disonnected", socket.id);
-        
+        console.log("Socket disonnected", socket.id); 
     })
 })
 

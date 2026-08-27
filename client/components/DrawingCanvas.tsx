@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { socket } from "@/lib/socket";
+
 
 export default function DrawingCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -13,7 +15,10 @@ export default function DrawingCanvas() {
   const pathRef = useRef<ImageData[]>([]);
   const indexRef = useRef(-1);
 
-  const canvasStartColor = "white";
+    const canvasStartColor = "white";
+    const previousPointRef = useRef<{ x: number, y: number } | null>(null);
+
+
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -31,6 +36,62 @@ export default function DrawingCanvas() {
 
     context.fillRect(0, 0, canvas.width, canvas.height);
   }, []);
+    
+    useEffect(() => {
+        function handleStroke(stroke: {
+            x1: number;
+            y1: number;
+            x2: number;
+            y2: number;
+            color: string;
+            width: number;
+        })
+        {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+
+            const context = canvas.getContext("2d");
+            if (!context) return;
+
+            drawLine(
+                context,
+                stroke.x1,
+                stroke.y1,
+                stroke.x2,
+                stroke.y2,
+                stroke.color,
+                stroke.width,
+            )
+
+        }
+        socket.on("draw:stroke", handleStroke);
+    
+      return () => {
+          socket.off("draw:stroke", handleStroke);
+      }
+    }, [])
+
+    useEffect(() => {
+        // something to do 
+        function handleConnect()
+        {
+            console.log("Socket connecte",socket.id);
+        }
+
+        socket.on("connect", handleConnect); //listining for event connect
+
+        if (!socket.connected)
+        {
+            socket.connect();
+        }
+        
+      return () => {
+          // clean up after unmount of component
+          socket.off("connect", handleConnect); // stop listening
+      }
+    }, [])
+    
+    
 
   function getPosition(event: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
@@ -46,30 +107,41 @@ export default function DrawingCanvas() {
     const y = (event.clientY - rect.top) * (canvas.height / rect.height);
 
     return { x, y };
-  }
+    }
+    
+
+    function drawLine(
+        context: CanvasRenderingContext2D,
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        color: string,
+        width:number,
+    )
+    {
+        context.beginPath();
+        context.moveTo(x1, y1);
+        context.lineTo(x2, y2);
+        context.strokeStyle = color;
+        context.lineWidth = width;
+
+        context.lineCap = "round";
+        context.lineJoin = "round";
+
+        context.stroke();
+        context.closePath();
+
+    }
+
 
   function start(event: React.PointerEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current;
-
-    if (!canvas) return;
-
-    const context = canvas.getContext("2d");
-
-    if (!context) return;
-
+    
     isDrawingRef.current = true;
-
-    const { x, y } = getPosition(event);
-
-    context.beginPath();
-
-    context.strokeStyle = drawColor;
-    context.lineWidth = drawWidth;
-    context.lineCap = "round";
-    context.lineJoin = "round";
-
-    context.moveTo(x, y);
+    const point = getPosition(event);
+    previousPointRef.current=point;
   }
+    
 
   function draw(event: React.PointerEvent<HTMLCanvasElement>) {
     if (!isDrawingRef.current) return;
@@ -82,15 +154,41 @@ export default function DrawingCanvas() {
 
     if (!context) return;
 
-    const { x, y } = getPosition(event);
+      const previousPoint = previousPointRef.current;
+      if (!previousPoint)
+      {
+          return;
+      }
+      const currentPoint = getPosition(event);
 
-    context.lineTo(x, y);
+      drawLine(
+          context,
+          previousPoint.x,
+          previousPoint.y,
+          currentPoint.x,
+          currentPoint.y,
+          drawColor,
+          drawWidth,
+      );
 
-    context.stroke();
+      socket.emit("draw:stroke", {
+          x1:previousPoint.x,
+          y1:previousPoint.y,
+          x2:currentPoint.x,
+          y2:currentPoint.y,
+          color:drawColor,
+          width:drawWidth,
+      })
+
+      previousPointRef.current = currentPoint;
   }
 
+    
   function stop() {
     if (!isDrawingRef.current) return;
+
+    isDrawingRef.current = false;
+    previousPointRef.current = null;
 
     const canvas = canvasRef.current;
 
@@ -100,17 +198,11 @@ export default function DrawingCanvas() {
 
     if (!context) return;
 
-    context.stroke();
-    context.closePath();
-
-    isDrawingRef.current = false;
-
     const image = context.getImageData(0, 0, canvas.width, canvas.height);
 
     pathRef.current.push(image);
-
     indexRef.current += 1;
-  }
+  } 
 
   function clearCanvas() {
     const canvas = canvasRef.current;
